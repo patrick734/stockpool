@@ -1,0 +1,62 @@
+{
+  "chainId": 4663,
+  "block": 82992639,
+  "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+  "timelock": "0xD62D354723225f826B078d38337D3D1ecf456d01",
+  "swapAdapter": "0x747238eba29Cd3D4E42Ad931357E7e15B0BeD01c",
+  "buyBurn": "0x7A0527583a23BdCFE823a45e4F3D2927B60795A5",
+  "oracle": "0xB249e667Fa7641A2C51Cfb79F75cf2FF55b02140",
+  "feeRouter": "0x505d3a6369A1D6C9c8C332289964a7e79d13c00e",
+  "registry": "0x560FadBFc92b8Bd26134F4DA2fB01797890e3D11",
+  "basket": "0x278A10F25288eBa93D488CC127B7B40D3c01fBf1",
+  "token": null,
+  "tokenSymbol": null,
+  "pools": {
+    "NVDA": {
+      "vault": "0x7B2063bA3148BA1AfF559B024Ec3e2A440DFf02D",
+      "position": "0x435C525e4E7947ce933DddAB07a757AAdb4A2309",
+      "stock": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "name": "NVIDIA",
+      "feed": "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15"
+    },
+    "TSLA": {
+      "vault": "0xaB14A2771a72c4D49A56b01829bf52149D376691",
+      "position": "0xBdCbBC2815EE314b0E2a9d46bFd4c222FeB7f8a5",
+      "stock": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "name": "Tesla",
+      "feed": "0x4A1166a659A55625345e9515b32adECea5547C38"
+    },
+    "AAPL": {
+      "vault": "0x1E3a0B5646f229B19970C42218058c4e6C004046",
+      "position": "0x296953A07B902e78e3C8F969975778F6198C6a18",
+      "stock": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "name": "Apple",
+      "feed": "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0"
+    },
+    "META": {
+      "vault": "0x1575151595EECD532C83E21D82F22A397D73E4aC",
+      "position": "0x8443D4fc0288798785184fB05f8959072A35a43c",
+      "stock": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "name": "Meta",
+      "feed": "0x7C38C00C30BEe9378381E7B6135d7283356D71b1"
+    },
+    "GOOGL": {
+      "vault": "0xb400a2c003D290F78A3DB643e5866d45afF72836",
+      "position": "0x30973C02A7ebD2957baD46D6F30FBdE674BDE0C5",
+      "stock": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "name": "Alphabet",
+      "feed": "0xF6f373a037c30F0e5010d854385cA89185AE638b"
+    },
+    "SPY": {
+      "vault": "0x4535DaB199Db36aCBAA20cEEf32DA292054F71B1",
+      "position": "0x18367B4FF0910Fa852b3b0e743959D39bE22F618",
+      "stock": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+      "name": "SPDR S&P 500",
+      "feed": "0x319724394D3A0e3669269846abE664Cd621f9f6A"
+    }
+  },
+  "creditLines": {
+    "META": "0x3af262514fd045c64a5f7b19A3848227D9fD6758",
+    "NVDA": "0x7b2B3004a5C729fd7DCC661A8E6dA18Acb1ED9E5"
+  }
+}
