@@ -16,13 +16,13 @@ function resolveHop(ctx, hop, tokenIn) {
     if (!tokenIn) throw new Error(`route hop "IN" needs a token being sold`);
     return tokenIn;
   }
-  if (name === "USDG") return ethers.getAddress(ctx.dep.usdg);
+  if (name === "USDG") return ethers.getAddress(ctx.dep.usdg || "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168");
   if (name === "ETH" || name === "NATIVE") return ethers.ZeroAddress;
   if (name === "TOKEN") {
     if (!ctx.dep.token) throw new Error("the Stockpool token is not set yet");
     return ethers.getAddress(ctx.dep.token);
   }
-  const stock = (ctx.dep.markets && ctx.dep.markets[name]) || (ctx.dep.stocks && ctx.dep.stocks[name]);
+  const stock = ctx.dep.series && ctx.dep.series[name];
   if (stock) return ethers.getAddress(stock.token);
   throw new Error(`unknown route hop "${hop}"`);
 }

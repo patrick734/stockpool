@@ -1,122 +1,59 @@
-// End-to-end check of the keeper against a local Hardhat node running the seeded demo deployment.
-//
-// First terminal:   cd burn && npx hardhat node --port 8547
-// Second terminal:  cd burn && npx hardhat run scripts/deploy.js --network keeper
-//                   //                   cd ../keeper && npm run smoke
-//
-// Refuses to run on anything but a Hardhat chain (31337): it moves time and pushes mock prices.
-const path = require("path");
-const { spawnSync } = require("child_process");
+#!/usr/bin/env node
+// End-to-end check of the keeper against a local chain, sending real transactions there:
+//   cd contracts && npx hardhat node --port 8547                               (terminal 1)
+//   npx hardhat run scripts/deploy.js --network keeper && cd ../keeper && npm run smoke
+// Jumps past the next lock time, pushes a price to every mock feed, then runs one keeper cycle as hardhat account #3
+// (the demo deployment's keeper) and checks it locked and settled the due rounds, opened the next ones and burned fees.
 const { ethers } = require("ethers");
+const path = require("path");
+const fs = require("fs");
 
-const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8547";
-const NETWORK = process.env.KEEPER_NETWORK || "keeper";
-// Hardhat's well-known dev accounts (not secrets): #3 is the keeper deploy.js sets on local chains, #0 pushes
-// mock prices.
-const HARDHAT_KEEPER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
-const HARDHAT_ACCOUNT_0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-process.env.KEEPER_NETWORK = NETWORK;
-const { loadDeployment } = require("../src/config");
-const abis = require("../src/abis");
-
-const MOCK_FEED = ["function setAnswer(int256)", "function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"];
-let failures = 0;
-const check = (ok, msg) => {
-  console.log(`${ok ? "  PASS" : "  FAIL"} ${msg}`);
-  if (!ok) failures++;
-};
-
-function runKeeper(label, extraEnv = {}) {
-  console.log(`\n===== keeper --once (${label}) =====`);
-  const r = spawnSync(process.execPath, [path.join(__dirname, "..", "src", "index.js"), "--once"], {
-    env: { ...process.env, RPC_URL, KEEPER_NETWORK: NETWORK, KEEPER_CONFIG: path.join(__dirname, "smoke.config.json"), ...extraEnv },
-    encoding: "utf8",
-  });
-  const out = (r.stdout || "") + (r.stderr || "");
-  process.stdout.write(out);
-  if (r.status !== 0) {
-    console.log(`  FAIL keeper exited with ${r.status}`);
-    failures++;
-  }
-  return out;
-}
+const RPC = process.env.RPC_URL || "http://127.0.0.1:8547";
+const KEEPER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"; // hardhat account #3
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
-  if (Number((await provider.getNetwork()).chainId) !== 31337) throw new Error("smoke test only runs against a local Hardhat node");
-  const dep = loadDeployment(NETWORK);
-  const signer = new ethers.NonceManager(new ethers.Wallet(HARDHAT_ACCOUNT_0, provider));
-  const live = { DRY_RUN: "0", KEEPER_PRIVATE_KEY: HARDHAT_KEEPER_KEY };
+  const dep = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "contracts", "deployments", "keeper.json"), "utf8"));
+  const provider = new ethers.JsonRpcProvider(RPC);
+  const dev = await provider.getSigner(0); // the local node keeps its accounts unlocked
+  const abis = require("../src/abis");
+  const rounds = new ethers.Contract(dep.rounds, abis.Rounds, provider);
+  const feedAbi = ["function setAnswer(int256)", "function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"];
 
-  const oracle = new ethers.Contract(dep.oracle, abis.Oracle, provider);
-  const tok = new ethers.Contract(dep.token, [...abis.ERC20, "function totalSupply() view returns (uint256)"], provider);
-  const keeperAddr = new ethers.Wallet(HARDHAT_KEEPER_KEY).address;
-  const pools = Object.entries(dep.liquidityVaults).map(([t, v]) => [t, new ethers.Contract(v.vault, abis.LiquidityVault, provider)]);
-  const desks = Object.entries(dep.creditLines).map(([t, a]) => [t, new ethers.Contract(a, abis.CreditDesk, provider)]);
-
-  async function pushPrices(bump = 1) {
-    const usdgFeed = new ethers.Contract(await oracle.usdgFeed(), MOCK_FEED, signer);
-    await (await usdgFeed.setAnswer(100_000_000n)).wait();
-    for (const m of Object.values(dep.markets)) {
-      const f = new ethers.Contract(m.feed, MOCK_FEED, signer);
-      const [, a] = await f.latestRoundData();
-      await (await f.setAnswer((a * BigInt(Math.round(bump * 1000))) / 1000n)).wait();
-    }
+  const before = Number(await rounds.roundCount());
+  const open = await rounds.round((await rounds.series(0)).lastRound);
+  await provider.send("evm_setNextBlockTimestamp", [Number(open.lockAt) + 3600]);
+  await provider.send("evm_mine", []);
+  for (const s of Object.values(dep.series)) {
+    const feed = new ethers.Contract(s.feed, feedAbi, dev);
+    const [, answer] = await feed.latestRoundData();
+    await (await feed.setAnswer((answer * 103n) / 100n)).wait();
   }
-  async function warp(seconds) {
-    await provider.send("evm_increaseTime", [seconds]);
-    await provider.send("evm_mine", []);
-  }
-  const values = async () => Promise.all(pools.map(([, w]) => w.totalAssets()));
-  const MINT = ["function mint(address,uint256)", ...abis.ERC20];
-  const usdg = new ethers.Contract(dep.usdg, MINT, signer);
-  const nvda = new ethers.Contract(dep.stocks.NVDA.token, MINT, signer);
 
-  // Fees already waiting in BuyBurn, in USDG and in a Stock Token, as Pool fees arrive after the fee router.
-  await (await usdg.mint(dep.buyBurn, 120_000_000n)).wait(); // 120 USDG
-  await (await nvda.mint(dep.buyBurn, 10n ** 17n)).wait(); // 0.1 NVDA
+  process.env.RPC_URL = RPC;
+  process.env.KEEPER_NETWORK = "keeper";
+  process.env.KEEPER_PRIVATE_KEY = KEEPER_KEY;
+  process.env.DRY_RUN = "0";
+  const { init, cycle } = require("../src/index");
+  const ctx = await init();
+  await cycle(ctx, 1);
 
-  // 1. Dry run: simulates everything, sends nothing.
-  await pushPrices();
-  const nonceBefore = await provider.getTransactionCount(keeperAddr);
-  const dry = runKeeper("dry run");
-  check(/DRY_RUN, would send/.test(dry) || /nothing to/.test(dry), "dry run simulates");
-  check((await provider.getTransactionCount(keeperAddr)) === nonceBefore, "dry run sent nothing");
-
-  // A fresh Basket deposit, all idle: the keeper should put most of it to work.
-  const DEMO_KEY = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"; // Hardhat account #4, the demo depositor
-  const demo = new ethers.NonceManager(new ethers.Wallet(DEMO_KEY, provider));
-  const basket = new ethers.Contract(dep.basket, abis.Basket, demo);
-  await (await new ethers.Contract(dep.usdg, ["function approve(address,uint256) returns (bool)"], demo).approve(dep.basket, 8_000_000_000n)).wait();
-  await (await basket.deposit(8_000_000_000n, await demo.getAddress())).wait();
-  const idleBefore = await basket.idle();
-
-  // 2. Live: Pools rebalance and harvest, their fees go through the FeeRouter to BuyBurn, and BuyBurn burns SPOOL.
-  const supplyBefore = await tok.totalSupply();
-  const out = runKeeper("live", live);
-  check((await provider.getTransactionCount(keeperAddr)) > nonceBefore, "keeper sent transactions");
-  check(/buying and burning|rate limited|no fees waiting/.test(out), "buy and burn ran");
-  check((await tok.totalSupply()) < supplyBefore, "fees bought and burned some SPOOL");
-  for (const [t, w] of pools) check((await w.totalAssets()) > 0n, `${t} Pool holds value`);
-  const [idleAfter, basketTotal] = await Promise.all([basket.idle(), basket.totalAssets()]);
-  check(idleAfter < idleBefore && idleAfter * 10n < basketTotal * 3n, `Basket idle USDG put to work (${ethers.formatUnits(idleBefore, 6)} -> ${ethers.formatUnits(idleAfter, 6)})`);
-  const feeRouterUsdg = await usdg.balanceOf(dep.feeRouter);
-  check(feeRouterUsdg === 0n, "the FeeRouter forwarded everything to BuyBurn");
-
-  // 3. A day later, with prices up 2%: the Pools re-centre, credit lines accrue interest and reserves are claimed.
-  const before = await values();
-  await warp(2 * 24 * 3600);
-  await pushPrices(1.02);
-  const later = runKeeper("live, two days later", live);
-  const after = await values();
-  check(after.every((v, i) => v > 0n && v !== before[i]), "every Pool was revalued at the new price");
-  check(/\[credit\]/.test(later), "credit lines were checked");
-  for (const [t, d] of desks) check((await d.totalDebt()) > 500_000_000n, `${t} credit line accrued interest on its loan`);
-  check((await nvda.balanceOf(dep.buyBurn)) < 10n ** 17n || (await usdg.balanceOf(dep.buyBurn)) === 0n, "stock fees are being spent on SPOOL");
-
-  console.log(failures ? `\n${failures} smoke check(s) FAILED` : "\nsmoke test passed");
-  process.exit(failures ? 1 : 0);
+  let failed = 0;
+  const check = (ok, msg) => {
+    console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`);
+    if (!ok) failed++;
+  };
+  const n = Object.keys(dep.series).length;
+  const count = Number(await rounds.roundCount());
+  check(count === before + n, `opened ${count - before} new rounds (one per stock)`);
+  const states = [0, 0, 0, 0, 0];
+  for (let id = 1; id <= count; id++) states[Number((await rounds.round(id)).state)]++;
+  check(states[3] === 2 * n, `${states[3]} rounds settled (two per stock)`);
+  check(states[2] === n, `${states[2]} rounds running (one per stock)`);
+  check(states[1] === n, `${states[1]} rounds open for deposits (one per stock)`);
+  const bb = new ethers.Contract(dep.buyBurn, abis.BuyBurn, provider);
+  check((await bb.totalBurned()) > 0n, `BuyBurn has burned ${ethers.formatEther(await bb.totalBurned())} SPOOL`);
+  console.log(failed ? `\n${failed} check(s) failed` : "\nKeeper smoke test passed.");
+  process.exit(failed ? 1 : 0);
 }
 
 main().catch((e) => {

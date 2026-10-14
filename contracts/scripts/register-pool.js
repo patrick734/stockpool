@@ -1,7 +1,6 @@
 // Registers the Stockpool token's Pons pool (token / ETH) on the swap adapter once the token has graduated on Pons,
 // which is what lets BuyBurn buy and burn it. Checks the pool is live first. Read-only; sends nothing.
-// Before the timelock owns the adapter it prints one direct transaction for the deployer; after, the timelock
-// proposer's schedule and execute pair.
+// Prints the one transaction the dev wallet (the adapter's owner) sends; ./govern.sh register-pool sends it.
 //   node scripts/register-pool.js [deployments/robinhood.json]
 const fs = require("fs");
 const path = require("path");
@@ -16,15 +15,10 @@ const ADAPTER_ABI = [
   "function hookAllowed(address) view returns (bool)",
   "function owner() view returns (address)",
 ];
-const TIMELOCK_ABI = [
-  "function scheduleBatch(address[] targets, uint256[] values, bytes[] payloads, bytes32 predecessor, bytes32 salt, uint256 delay)",
-  "function executeBatch(address[] targets, uint256[] values, bytes[] payloads, bytes32 predecessor, bytes32 salt)",
-  "function getMinDelay() view returns (uint256)",
-];
 
 // Inspects the pool and adapter for deployment `d` and builds the registration transaction(s).
 // Returns { status, ... } where status is one of: not-initialized, no-liquidity, hook-not-allowed, registered,
-// direct (deployer still owns the adapter) or timelock.
+// or direct (the transaction for the dev wallet).
 async function plan(provider, d) {
   if (!d.token) {
     // The file may predate set-token; the contract is the source of truth.
@@ -50,20 +44,7 @@ async function plan(provider, d) {
 
   const setPool = adapter.interface.encodeFunctionData("setPool", [key]);
   const owner = await adapter.owner();
-  if (owner.toLowerCase() !== d.timelock.toLowerCase()) {
-    return { status: "direct", owner, tx: { to: d.swapAdapter, value: "0", data: setPool }, ...base };
-  }
-  const timelock = new ethers.Contract(d.timelock, TIMELOCK_ABI, provider);
-  const delay = await timelock.getMinDelay();
-  const targets = [d.swapAdapter], values = [0n], payloads = [setPool], predecessor = ethers.ZeroHash, salt = ethers.id("stockpool-register-pool");
-  const tl = new ethers.Interface(TIMELOCK_ABI);
-  return {
-    status: "timelock",
-    delay,
-    schedule: { to: d.timelock, value: "0", data: tl.encodeFunctionData("scheduleBatch", [targets, values, payloads, predecessor, salt, delay]) },
-    execute: { to: d.timelock, value: "0", data: tl.encodeFunctionData("executeBatch", [targets, values, payloads, predecessor, salt]) },
-    ...base,
-  };
+  return { status: "direct", owner, tx: { to: d.swapAdapter, value: "0", data: setPool }, ...base };
 }
 
 async function main() {
@@ -83,14 +64,8 @@ async function main() {
   }
   console.log(`  live: ${p.perEth.toFixed(0)} tokens per ETH, liquidity ${p.liquidity}`);
   if (p.status === "registered") return console.log("Already registered on the adapter. Nothing to do.");
-  if (p.status === "direct") {
-    console.log(`\nThe adapter is still owned by ${p.owner} (handoff not executed yet). ./govern.sh register-pool sends this from it:`);
-    return console.log(JSON.stringify(p.tx, null, 2));
-  }
-  console.log("\nStep 1, schedule (dev wallet, now). ./govern.sh register-pool sends it:");
-  console.log(JSON.stringify(p.schedule, null, 2));
-  console.log(`\nStep 2, execute (dev wallet, after ${Number(p.delay) / 3600}h):`);
-  console.log(JSON.stringify(p.execute, null, 2));
+  console.log(`\nThe adapter's owner ${p.owner} sends this (./govern.sh register-pool):`);
+  console.log(JSON.stringify(p.tx, null, 2));
 }
 
 module.exports = { plan };

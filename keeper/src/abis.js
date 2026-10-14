@@ -8,14 +8,9 @@ const { CONTRACTS } = require("./config");
 const DIR = process.env.KEEPER_ARTIFACTS_DIR || path.join(CONTRACTS, "artifacts");
 
 const FILES = {
-  LiquidityVault: "src/StockpoolVault.sol/StockpoolVault.json",
-  Oracle: "src/StockpoolOracle.sol/StockpoolOracle.json",
-  FeeRouter: "src/StockpoolFeeRouter.sol/StockpoolFeeRouter.json",
+  Rounds: "src/StockpoolRounds.sol/StockpoolRounds.json",
   BuyBurn: "src/StockpoolBuyBurn.sol/StockpoolBuyBurn.json",
-  CreditDesk: "src/StockpoolCreditDesk.sol/StockpoolCreditDesk.json",
-  Position: "src/v4/StockpoolPosition.sol/StockpoolPosition.json",
   SwapAdapter: "src/v4/StockpoolSwapAdapter.sol/StockpoolSwapAdapter.json",
-  Basket: "src/StockpoolBasket.sol/StockpoolBasket.json",
 };
 
 const ERC20 = [
@@ -30,8 +25,6 @@ const AGGREGATOR = [
   "function getRoundData(uint80 roundId) view returns (uint80, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
 ];
 
-const STOCK_TOKEN = [...ERC20, "function oraclePaused() view returns (bool)"];
-
 function load(name) {
   const file = path.join(DIR, FILES[name]);
   if (!fs.existsSync(file)) throw new Error(`Missing ABI artifact ${file}. Run \`npx hardhat compile\` in contracts/ first.`);
@@ -41,6 +34,5 @@ function load(name) {
 const abis = Object.fromEntries(Object.keys(FILES).map((n) => [n, load(n)]));
 abis.ERC20 = ERC20;
 abis.Aggregator = AGGREGATOR;
-abis.StockToken = STOCK_TOKEN;
 
 module.exports = abis;

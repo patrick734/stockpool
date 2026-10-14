@@ -1,6 +1,6 @@
 """Renders the Stockpool logo, X header and link preview image. Run: python3 launch-kit/render.py"""
 from playwright.sync_api import sync_playwright
-import pathlib, base64, shutil
+import os, pathlib, base64, shutil
 
 here = pathlib.Path(__file__).parent.resolve()
 FONT = base64.b64encode((here / "FamiljenGrotesk.woff2").read_bytes()).decode()
@@ -15,19 +15,23 @@ base = f'''<style>@font-face{{font-family:G;src:url(data:font/woff2;base64,{FONT
 html,body{{margin:0;background:{PAPER}}} *{{box-sizing:border-box}}
 .g{{font-family:G}}</style>'''
 
-# Each row: ticker, band start and end, Chainlink line (percent of the strip). Shapes only, no live numbers.
-ROWS = [("NVDA", 22, 74, 49), ("TSLA", 15, 70, 44), ("AAPL", 28, 78, 52), ("META", 20, 66, 46), ("GOOGL", 26, 80, 55), ("MSFT", 24, 72, 47), ("SPY", 30, 76, 51)]
+BOOST = "#c0661f"
+# Each row: ticker and Shield's share of the pool (percent). Shapes only, no live numbers.
+ROWS = [("NVDA", 72), ("TSLA", 64), ("AAPL", 75), ("META", 68), ("GOOGL", 74), ("MSFT", 70), ("SPY", 75)]
 
 
 def strips(rows, w, h, gap, label):
     out = []
-    for t, a, b, c in rows:
+    for t, shield in rows:
         out.append(f'''<div style="display:flex;align-items:center;gap:18px">
 <div class="g" style="width:{label}px;font-weight:650;font-size:{int(h * 0.62)}px;color:{INK}">{t}</div>
-<div style="position:relative;width:{w}px;height:{h}px;border-radius:{h // 4}px;background:{TRACK}">
-<div style="position:absolute;left:{a}%;width:{b - a}%;top:{h * 0.18}px;bottom:{h * 0.18}px;border-radius:{h // 6}px;background:{BAND}"></div>
-<div style="position:absolute;left:{c}%;top:0;bottom:0;width:3px;margin-left:-1.5px;background:{BRASS}"></div></div></div>''')
-    return f'<div style="display:grid;gap:{gap}px">{"".join(out)}</div>'
+<div style="display:flex;gap:4px;width:{w}px;height:{h}px">
+<div style="width:{shield}%;border-radius:{h // 4}px;background:{TEAL}"></div>
+<div style="flex:1;border-radius:{h // 4}px;background:{BOOST}"></div></div></div>''')
+    legend = f'''<div class="g" style="display:flex;gap:22px;font-size:{int(h * 0.55)}px;color:{INK};margin-top:6px;padding-left:{label + 18}px">
+<span><span style="display:inline-block;width:14px;height:14px;border-radius:4px;background:{TEAL};margin-right:8px"></span>Shield</span>
+<span><span style="display:inline-block;width:14px;height:14px;border-radius:4px;background:{BOOST};margin-right:8px"></span>Boost</span></div>'''
+    return f'<div style="display:grid;gap:{gap}px">{"".join(out)}{legend}</div>'
 
 
 logo = base + f'<div style="width:1000px;height:1000px;display:grid;place-items:center;background:{PAPER}"><div style="width:640px;height:640px">{mark()}</div></div>'
@@ -35,17 +39,17 @@ logo = base + f'<div style="width:1000px;height:1000px;display:grid;place-items:
 header = base + f'''<div class="g" style="width:1500px;height:500px;position:relative;overflow:hidden;color:{INK};background:{PAPER}">
 <div style="position:absolute;left:440px;top:150px;width:470px">
 <div style="font-size:88px;font-weight:650;line-height:1;letter-spacing:-2px">Stockpool</div>
-<div style="font-size:29px;color:#3b5754;margin-top:20px;line-height:1.3">Every trade pays the pool.<br>Deposit USDG, earn a stock&#39;s fees.</div></div>
-<div style="position:absolute;right:90px;top:72px;padding:26px 30px;background:{SURFACE};border:1px solid #cdd9d4;border-radius:22px">{strips(ROWS, 330, 30, 13, 92)}</div></div>'''
+<div style="font-size:29px;color:#3b5754;margin-top:20px;line-height:1.3">Pool a stock for a week.<br><span style="color:{TEAL}">Shield</span> it or <span style="color:{BOOST}">Boost</span> it.</div></div>
+<div style="position:absolute;right:90px;top:72px;padding:26px 30px;background:{SURFACE};border:1px solid #cdd9d4;border-radius:22px">{strips(ROWS, 330, 28, 12, 92)}</div></div>'''
 
 og = base + f'''<div class="g" style="width:1200px;height:630px;position:relative;overflow:hidden;color:{INK};background:{PAPER}">
 <div style="position:absolute;left:72px;top:64px;display:flex;align-items:center;gap:16px"><div style="width:56px;height:56px">{mark()}</div><div style="font-size:40px;font-weight:650;letter-spacing:-0.5px">Stockpool</div></div>
-<div style="position:absolute;left:72px;top:190px;width:560px;font-size:84px;font-weight:650;line-height:0.98;letter-spacing:-2.5px">Every trade pays the pool.</div>
-<div style="position:absolute;left:72px;bottom:64px;width:520px;font-size:25px;line-height:1.35;color:#3b5754">Deposit USDG into a stock&#39;s Pool on Robinhood Chain and earn its Uniswap fees.</div>
+<div style="position:absolute;left:72px;top:190px;width:560px;font-size:84px;font-weight:650;line-height:0.98;letter-spacing:-2.5px"><span style="color:{TEAL}">Shield</span> it or <span style="color:{BOOST}">Boost</span> it.</div>
+<div style="position:absolute;left:72px;bottom:64px;width:520px;font-size:25px;line-height:1.35;color:#3b5754">Weekly rounds on Robinhood Stock Tokens. Shield keeps its dollars plus a coupon; Boost takes the upside.</div>
 <div style="position:absolute;right:64px;top:92px;padding:26px 28px;background:{SURFACE};border:1px solid #cdd9d4;border-radius:22px">{strips(ROWS, 300, 34, 16, 88)}</div></div>'''
 
 with sync_playwright() as p:
-    b = p.chromium.launch()
+    b = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH") or None)  # CHROMIUM_PATH: optional browser to use
     for name, html, w, h in [("stockpool-logo.png", logo, 1000, 1000), ("stockpool-x-header.png", header, 1500, 500), ("og.png", og, 1200, 630)]:
         pg = b.new_page(viewport={"width": w, "height": h})
         pg.set_content(html)

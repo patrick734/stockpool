@@ -1,6 +1,6 @@
-# Stockpool keeper, about every 15 minutes: keeps each Pool's range around the Chainlink price and
-# collects its fees, claims credit-line reserves, forwards fees to StockpoolBuyBurn and spends them on $SPOOL, which is
-# burned (BuyBurn itself allows at most one buy an hour). Does nothing until contracts/deployments/robinhood.json is committed.
+# Stockpool keeper, about every 15 minutes: locks and settles the Shield & Boost rounds with Chainlink's prices, opens
+# the next week's round for every stock, and spends the fees on $SPOOL, which is burned (BuyBurn allows at most one buy
+# an hour). Does nothing until contracts/deployments/robinhood.json is committed.
 # Dry run (simulates, sends nothing) until the repository variable KEEPER_LIVE is set to 1.
 # Secret KEEPER_PRIVATE_KEY is created by: node tools/wallet.js keeper-secret. Optional secret RPC_URL.
 name: Stockpool keeper
@@ -51,13 +51,6 @@ jobs:
         if: steps.dep.outputs.live == '1'
         working-directory: keeper
         run: npm ci --omit=dev --no-audit --no-fund
-      - name: Restore keeper state
-        if: steps.dep.outputs.live == '1'
-        uses: actions/cache/restore@v4
-        with:
-          path: keeper/.state
-          key: keeper-state-${{ github.run_id }}
-          restore-keys: keeper-state-
       - name: Run one keeper cycle
         if: steps.dep.outputs.live == '1'
         working-directory: keeper
@@ -67,13 +60,6 @@ jobs:
           RPC_URL: ${{ secrets.RPC_URL || 'https://rpc.mainnet.chain.robinhood.com' }}
           KEEPER_NETWORK: robinhood
           DRY_RUN: ${{ vars.KEEPER_LIVE == '1' && '0' || '1' }}
-          KEEPER_STATE_FILE: .state/keeper.json
-      - name: Save keeper state
-        if: always() && steps.dep.outputs.live == '1' && hashFiles('keeper/.state/keeper.json') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: keeper/.state
-          key: keeper-state-${{ github.run_id }}
       - name: Keep the schedule alive
         if: always() && github.event_name == 'schedule'
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keeper.yml/enable" >/dev/null || true

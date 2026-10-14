@@ -1,26 +1,28 @@
 "use client";
 
-import { formatUnits } from "viem";
 import { useAccount } from "wagmi";
-import { CREDIT_LINES, LIVE, poolOf } from "@/lib/config";
-import { SHARE_DECIMALS, usePortfolio } from "@/lib/data";
-import { num, usd } from "@/lib/format";
-import { stockToken } from "@/lib/tokens";
+import { roundsAbi } from "@/generated/abis";
+import { CONTRACTS, LIVE, txUrl } from "@/lib/config";
+import { amount } from "@/lib/format";
+import { settledReturns, signedPct, usePositions, type Position } from "@/lib/rounds";
+import { useTx } from "@/lib/tx";
 import { Footer, Header } from "@/components/Header";
-import { TokenDot } from "@/components/TokenDot";
 import { useOpenWallet } from "@/components/Wallet";
 
-const shares = (v: bigint) => num(Number(formatUnits(v, SHARE_DECIMALS)));
+const label: Record<string, string> = { open: "Deposits open", locked: "Running", settled: "Settled", void: "Void: refunded" };
 
 export default function PortfolioPage() {
   const { address } = useAccount();
   const openWallet = useOpenWallet();
-  const { data } = usePortfolio(CREDIT_LINES.map((c) => ({ ticker: c.ticker, desk: c.desk })));
-  const pools = data?.pools.filter((p) => p.shares > 0n) ?? [];
-  const basket = data?.basket && data.basket.shares > 0n ? data.basket : null;
-  const credit = data?.credit.filter((c) => c.lent > 0n || c.pledged > 0n || c.debt > 0n) ?? [];
-  const total = pools.reduce((s, p) => s + (p.value ?? 0n), 0n) + (basket?.value ?? 0n) + credit.reduce((s, c) => s + c.lent + c.collateral - c.debt, 0n);
-  const empty = data && !pools.length && !basket && !credit.length;
+  const { data, isLoading } = usePositions();
+  const tx = useTx();
+  const claimable = (data ?? []).filter((p) => p.claimable > 0n);
+
+  async function claimAll() {
+    await tx.run(`Claim ${claimable.length} round${claimable.length === 1 ? "" : "s"}`, async ({ call }) =>
+      call({ address: CONTRACTS.rounds!, abi: roundsAbi, functionName: "claimMany", args: [claimable.map((p) => BigInt(p.round.id)), address!] }),
+    );
+  }
 
   return (
     <>
@@ -29,110 +31,88 @@ export default function PortfolioPage() {
         <div className="page-head plain">
           <div>
             <h1>Portfolio</h1>
-            <p>{address && total > 0n ? `${usd(total)} across Stockpool, valued at Chainlink’s prices.` : "Everything your wallet holds across Stockpool."}</p>
+            <p>Your Shield and Boost positions in recent rounds. Claims pay in the round&apos;s Stock Token.</p>
           </div>
         </div>
         {!LIVE ? (
-          <p className="note">Stockpool opens when the contracts are live.</p>
+          <p className="note">The rounds open when the contracts are live.</p>
         ) : !address ? (
+          <button className="button" onClick={openWallet}>
+            Connect wallet
+          </button>
+        ) : isLoading || !data ? (
+          <p className="note">Reading your positions…</p>
+        ) : data.length === 0 ? (
           <div className="empty">
-            <p>Connect a wallet to see your Pools, Basket and credit lines.</p>
-            <button className="button" onClick={openWallet}>
-              Connect wallet
-            </button>
-          </div>
-        ) : !data ? (
-          <p className="note">Reading your wallet…</p>
-        ) : empty ? (
-          <div className="empty">
-            <p>Nothing here yet. Deposit USDG into a Pool or the Basket and it shows up here.</p>
-            <a className="button" href="/#pools">
-              Choose a Pool
+            <p>No positions yet.</p>
+            <a className="button" href="/#rounds">
+              Pick a side in this week&apos;s rounds
             </a>
           </div>
         ) : (
-          <div className="table-wrap">
-            <table className="pools">
-              <thead>
-                <tr>
-                  <th>Position</th>
-                  <th className="num">Shares</th>
-                  <th className="num">Worth</th>
-                  <th aria-label="Action" />
-                </tr>
-              </thead>
-              <tbody>
-                {pools.map((p) => (
-                  <tr key={p.vault}>
-                    <td>
-                      <a className="asset" href={`/pool/?t=${p.ticker}`}>
-                        <TokenDot token={stockToken(p)} />
-                        <span>
-                          <b>{p.ticker} Pool</b>
-                          <em>{p.name}</em>
-                        </span>
-                      </a>
-                    </td>
-                    <td className="num">
-                      {shares(p.shares)} sp{p.ticker}
-                    </td>
-                    <td className="num">{p.value !== undefined ? usd(p.value) : "Price stale"}</td>
-                    <td className="num">
-                      <a className="button small quiet" href={`/pool/?t=${p.ticker}`}>
-                        Manage
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-                {basket && (
-                  <tr>
-                    <td>
-                      <a className="asset" href="/basket/">
-                        <span>
-                          <b>The Basket</b>
-                          <em>Every Pool at once</em>
-                        </span>
-                      </a>
-                    </td>
-                    <td className="num">{shares(basket.shares)} spBASKET</td>
-                    <td className="num">{basket.value !== undefined ? usd(basket.value) : "Price stale"}</td>
-                    <td className="num">
-                      <a className="button small quiet" href="/basket/">
-                        Manage
-                      </a>
-                    </td>
-                  </tr>
+          <>
+            {claimable.length > 0 && (
+              <div className="sb-claimbar">
+                <span>
+                  {claimable.length} round{claimable.length === 1 ? "" : "s"} ready to claim
+                </span>
+                <button className="button" disabled={tx.busy} onClick={claimAll}>
+                  Claim all
+                </button>
+              </div>
+            )}
+            {(tx.message || tx.error) && (
+              <p className={`msg ${tx.error ? "err" : "ok"}`}>
+                {tx.error ?? tx.message}{" "}
+                {tx.hash && (
+                  <a href={txUrl(tx.hash)} target="_blank" rel="noopener">
+                    View
+                  </a>
                 )}
-                {credit.map((c) => {
-                  const pool = poolOf(c.ticker);
-                  const bits = [c.lent > 0n && `Lent ${usd(c.lent)}`, c.debt > 0n && `borrowed ${usd(c.debt)}`, c.pledged > 0n && `${shares(c.pledged)} sp${c.ticker} pledged`].filter(Boolean);
-                  return (
-                    <tr key={c.desk}>
-                      <td>
-                        <a className="asset" href={`/borrow/#line-${c.ticker.toLowerCase()}`}>
-                          {pool && <TokenDot token={stockToken(pool)} />}
-                          <span>
-                            <b>{c.ticker} credit line</b>
-                            <em>{(s => s.charAt(0).toUpperCase() + s.slice(1))(bits.join(", "))}</em>
-                          </span>
-                        </a>
-                      </td>
-                      <td className="num">{c.pledged > 0n ? `${shares(c.pledged)} sp${c.ticker}` : ""}</td>
-                      <td className="num">{(() => { const net = c.lent + c.collateral - c.debt; return net >= 0n ? usd(net) : `−${usd(-net)}`; })()}</td>
-                      <td className="num">
-                        <a className="button small quiet" href={`/borrow/#line-${c.ticker.toLowerCase()}`}>
-                          Manage
-                        </a>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              </p>
+            )}
+            <div className="table-wrap">
+              <table className="pools">
+                <thead>
+                  <tr>
+                    <th>Round</th>
+                    <th>Status</th>
+                    <th className="num">Shield</th>
+                    <th className="num">Boost</th>
+                    <th className="num">Result</th>
+                    <th className="num">To claim</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((p) => (
+                    <Row key={p.round.id} p={p} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </main>
       <Footer />
     </>
+  );
+}
+
+function Row({ p }: { p: Position }) {
+  const ret = settledReturns(p.round);
+  const result = ret ? [p.shield > 0n ? `Shield ${signedPct(ret.shield)}` : "", p.boost > 0n ? `Boost ${signedPct(ret.boost)}` : ""].filter(Boolean).join(" · ") : "—";
+  return (
+    <tr>
+      <td>
+        <a href={`/stock/?t=${p.ticker}`}>
+          {p.ticker} #{p.round.id}
+        </a>
+      </td>
+      <td>{p.claimed ? "Claimed" : label[p.round.state] ?? p.round.state}</td>
+      <td className="num">{p.shield > 0n ? amount(p.shield, 18) : "—"}</td>
+      <td className="num">{p.boost > 0n ? amount(p.boost, 18) : "—"}</td>
+      <td className="num">{result}</td>
+      <td className="num">{p.claimable > 0n ? `${amount(p.claimable, 18)} ${p.ticker}` : "—"}</td>
+    </tr>
   );
 }

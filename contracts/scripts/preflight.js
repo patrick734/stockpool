@@ -1,6 +1,6 @@
 // Read-only launch checks. Sends nothing and never needs a private key.
 // Usage: node scripts/preflight.js
-// Env: ADMIN_MULTISIG, GUARDIAN_MULTISIG, KEEPER_ADDRESS, TOKEN_ADDRESS (optional),
+// Env: KEEPER_ADDRESS, DEPLOYER_ADDRESS, TOKEN_ADDRESS (optional),
 //      DEPLOYER_ADDRESS (optional, for the gas balance check), ROBINHOOD_RPC_URL (optional).
 // Exits 1 if any check fails, so a launch script can stop before deploying.
 const { ethers } = require("ethers");
@@ -39,20 +39,12 @@ async function main() {
 
   console.log("Roles");
   const roles = {};
-  for (const name of ["ADMIN_MULTISIG", "GUARDIAN_MULTISIG", "KEEPER_ADDRESS"]) {
-    const v = process.env[name];
-    if (!v || !ethers.isAddress(v)) {
-      fail(`${name} is not set to an address`);
-      continue;
-    }
-    roles[name] = ethers.getAddress(v);
-    const code = await withRetry(() => provider.getCode(v));
-    const isContract = code !== "0x";
-    const wantsContract = name !== "KEEPER_ADDRESS";
-    if (wantsContract && !isContract) warn(`${name} ${roles[name]} is a plain wallet, not a multisig contract`);
-    else ok(`${name} ${roles[name]}${isContract ? " (contract)" : ""}`);
+  const k = process.env.KEEPER_ADDRESS;
+  if (!k || !ethers.isAddress(k)) fail("KEEPER_ADDRESS is not set to an address");
+  else {
+    roles.KEEPER_ADDRESS = ethers.getAddress(k);
+    ok(`keeper ${roles.KEEPER_ADDRESS}: opens, locks and settles rounds and runs BuyBurn`);
   }
-  if (roles.ADMIN_MULTISIG && roles.ADMIN_MULTISIG === roles.GUARDIAN_MULTISIG) ok("one wallet holds admin (via the 48h timelock) and guardian");
 
   if (process.env.DEPLOYER_ADDRESS) {
     console.log("Deployer");
@@ -63,7 +55,8 @@ async function main() {
       const msg = `${ethers.getAddress(d)} holds ${ethers.formatEther(bal)} ETH`;
       if (bal >= MIN_DEPLOYER_ETH) ok(msg);
       else fail(`${msg}, needs at least ${ethers.formatEther(MIN_DEPLOYER_ETH)} for gas`);
-      if (Object.values(roles).includes(ethers.getAddress(d))) warn("the deployer is also one of the role addresses");
+      if (Object.values(roles).includes(ethers.getAddress(d))) fail("the dev wallet must not be the keeper");
+      else ok("the dev wallet owns StockpoolRounds, BuyBurn and the swap adapter");
     }
   }
 
@@ -87,21 +80,29 @@ async function main() {
     }
   }
 
-  // Each Pool keeps its range in its stock's hookless USDG v4 pool. Pools whose fee is too high for the 1% swap-loss
-  // limit, or with too little liquidity, are left out at deploy time.
-  console.log("Pools (snapshot from probe-pools, which launch.sh runs right before this)");
+  // Every series needs a Stock Token and its Chainlink feed. Fees are sold through the stock's USDG pool; a stock
+  // without one still gets a series, its fees just wait in BuyBurn.
+  console.log("Series (Chainlink feeds now; pools from probe-pools, which launch.sh runs right before this)");
+  const feedAbi = ["function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)"];
   let usable = 0;
-  for (const ticker of config.launch.pools) {
-    const pool = pools[ticker] && pools[ticker].pool;
-    if (!config.stockTokens[ticker]) fail(`${ticker}: not in config.stockTokens`);
-    else if (!pool || !pool.liquidity || BigInt(pool.liquidity) < BigInt(config.launch.poolMinLiquidity)) warn(`${ticker}: no hookless USDG pool with enough liquidity; no Pool for ${ticker}`);
-    else if (Number(pool.fee) > config.launch.poolMaxFee) warn(`${ticker}: its pool charges ${Number(pool.fee) / 10_000}% a swap; no Pool for ${ticker}`);
-    else {
+  for (const ticker of config.launch.series) {
+    const s = config.stockTokens[ticker];
+    if (!s || !s.chainlinkFeed) {
+      fail(`${ticker}: no Stock Token or Chainlink feed in config.stockTokens`);
+      continue;
+    }
+    try {
+      const [, answer, , updatedAt] = await withRetry(() => new ethers.Contract(s.chainlinkFeed, feedAbi, provider).latestRoundData());
+      const age = Math.round((Date.now() / 1000 - Number(updatedAt)) / 3600);
+      const pool = pools[ticker] && pools[ticker].pool;
+      const sellable = pool && pool.liquidity && BigInt(pool.liquidity) >= BigInt(config.launch.poolMinLiquidity);
+      ok(`${ticker}: $${(Number(answer) / 1e8).toFixed(2)}, ${age}h old${sellable ? "" : " (no liquid USDG pool: its fees wait in BuyBurn)"}`);
       usable++;
-      ok(`${ticker}: pool ${pool.fee}/${pool.tickSpacing}, ${pool.offBps >= 0 ? "+" : ""}${pool.offBps}bps from Chainlink`);
+    } catch (e) {
+      fail(`${ticker}: could not read its Chainlink feed: ${e.shortMessage || e.message}`);
     }
   }
-  if (!usable) fail("no stock has a usable pool right now");
+  if (!usable) fail("no series can be listed");
 
   console.log(failed ? `\n${failed} check(s) failed. Fix them before deploying.` : "\nAll checks passed.");
   process.exit(failed ? 1 : 0);

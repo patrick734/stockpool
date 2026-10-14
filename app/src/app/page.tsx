@@ -1,94 +1,99 @@
 "use client";
 
 import { BRAND } from "@/lib/brand";
-import { CREDIT_LINES, LIVE } from "@/lib/config";
-import { useBasket, usePools } from "@/lib/data";
-import { usd } from "@/lib/format";
+import { LIVE } from "@/lib/config";
+import { useSeries } from "@/lib/rounds";
 import { Footer, Header } from "@/components/Header";
-import { PoolBoard, PoolTable } from "@/components/Pools";
-import { Allocation, LinesSummary, SpoolSection, Steps } from "@/components/Sections";
+import { Payoff, StockCard, roundsTotal } from "@/components/Rounds";
 
 export default function Home() {
-  const { data: pools, isError: offline } = usePools();
-  const { data: basket } = useBasket();
-  const deposited = (pools ?? []).reduce((s, p) => s + (p.value ?? 0n), 0n);
+  const { data, error } = useSeries();
+  const inPlay = roundsTotal(data);
   return (
     <>
       <Header />
       <main>
-        <section className="hero frame">
+        <section className="hero frame sb-hero">
           <div className="hero-copy">
-            <h1>Every trade pays the pool.</h1>
+            <h1>
+              Pool a stock.
+              <br />
+              <span className="sb-shield-t">Shield</span> it or <span className="sb-boost-t">Boost</span> it.
+            </h1>
             <p className="lede">
-              When someone swaps a Robinhood Stock Token on Uniswap, they pay a fee to whoever supplies the pool. {BRAND.name} lets you
-              be that supplier with plain USDG: deposit into a stock’s Pool and a keeper holds it in a tight range around Chainlink’s
-              price, where the trades happen.
+              Weekly rounds on Robinhood Stock Tokens. Shield gets its dollars back plus a fixed coupon. Boost takes the upside of the whole pool and the first
+              losses. Settled at Chainlink&apos;s price, paid in the stock, fully backed.
             </p>
             <div className="hero-actions">
-              <a className="button" href="#pools">
-                Choose a Pool
+              <a className="button" href="#rounds">
+                See this week&apos;s rounds
               </a>
-              <a className="button quiet" href="/basket/">
-                Use the Basket
+              <a className="button quiet" href="/docs/">
+                How it works
               </a>
             </div>
             <ul className="facts">
-              <li>70% of every swap fee stays with depositors and compounds.</li>
-              <li>Shares are priced by Chainlink, never by the pool.</li>
-              <li>Withdraw in kind any time, even when the market is closed.</li>
-              {deposited >= 1_000_000_000n && <li>{usd(deposited, true)} deposited across the Pools.</li>}
+              <li>No liquidations, no borrowing: every payout comes out of the pool</li>
+              <li>Start and end prices are the first Chainlink prices after fixed times</li>
+              <li>5% of Boost&apos;s profit buys and burns ${BRAND.token.symbol}</li>
             </ul>
           </div>
-          {LIVE ? <PoolBoard pools={pools} offline={offline && !pools} /> : <div className="board board-soon"><p>The Pools open when the contracts are live.</p></div>}
+          <div className="board sb-hero-chart">
+            <Payoff shieldMatched={0n} boostIn={0n} couponBps={100} feeBps={500} />
+            {LIVE && data && <p className="note">{inPlay > 0 ? `About $${Math.round(inPlay).toLocaleString("en-US")} in this week's rounds.` : "The first rounds are open for deposits."}</p>}
+          </div>
         </section>
 
-        {LIVE && (
-          <section id="pools" className="block frame">
-            <div className="block-head">
-              <h2>Pools</h2>
-              <p>One Pool per stock. Each keeps a single range in that stock’s USDG pool on Uniswap v4 and moves it when the price does.</p>
+        <section id="rounds" className="block frame">
+          <div className="block-head">
+            <h2>This week&apos;s rounds</h2>
+            <p>One round per stock, every week. Deposit the Stock Token on either side until the round locks; claim in the same stock after it ends.</p>
+          </div>
+          {!LIVE ? (
+            <div className="board board-soon">
+              <p>The rounds open when the contracts are live.</p>
             </div>
-            <PoolTable pools={pools} />
-          </section>
-        )}
-
-        {LIVE && (
-          <section className="block frame split">
-            <div>
-              <h2>Or take all of them.</h2>
-              <p>
-                The Basket is one deposit spread across every Pool. The keeper keeps about a fifth in USDG for withdrawals and puts the
-                rest to work, at most {basket ? (basket.maxAllocationBps / 100).toFixed(0) : "40"}% into any one Pool.
-              </p>
-              <a className="button" href="/basket/">
-                Open the Basket
-              </a>
+          ) : error ? (
+            <p className="msg err">Could not read Robinhood Chain right now. Refresh in a moment.</p>
+          ) : (
+            <div className="sb-grid">
+              {(data ?? []).map((s) => (
+                <StockCard key={s.ticker} s={s} />
+              ))}
+              {!data && <p className="note">Reading the rounds…</p>}
             </div>
-            <Allocation basket={basket} />
-          </section>
-        )}
+          )}
+        </section>
 
-        {CREDIT_LINES.length > 0 && (
-          <section className="block frame split">
-            <div>
-              <h2>Borrow without selling.</h2>
-              <p>
-                Pledge your Pool shares and borrow USDG against them. Your shares keep earning while they back the loan. Or lend USDG and
-                earn the interest borrowers pay.
-              </p>
-              <a className="button" href="/borrow/">
-                Go to Borrow
-              </a>
-            </div>
-            <LinesSummary />
-          </section>
-        )}
-
-        <Steps />
-        <SpoolSection />
+        <section className="block frame">
+          <div className="block-head">
+            <h2>A round, step by step</h2>
+          </div>
+          <ol className="steps">
+            <li>
+              <span className="step-n">1</span>
+              <h3>Deposit</h3>
+              <p>Put a Stock Token on Shield or Boost while the round is open. You can take it back until the lock.</p>
+            </li>
+            <li>
+              <span className="step-n">2</span>
+              <h3>Lock</h3>
+              <p>At the lock time the start price is the first Chainlink price at or after it. Shield is matched up to 3× Boost; the rest is refunded.</p>
+            </li>
+            <li>
+              <span className="step-n">3</span>
+              <h3>Run for a week</h3>
+              <p>Shield is owed its dollar value plus the coupon. Boost owns everything above that, and absorbs any shortfall first.</p>
+            </li>
+            <li>
+              <span className="step-n">4</span>
+              <h3>Settle and claim</h3>
+              <p>The end price is the first Chainlink price after the end. The pool splits in the stock; claim yours any time.</p>
+            </li>
+          </ol>
+        </section>
       </main>
       <Footer />
     </>
   );
 }
-

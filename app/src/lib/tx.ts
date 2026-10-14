@@ -9,7 +9,7 @@ import { walletError } from "@/components/Wallet";
 
 type TxState = { busy: boolean; message?: string; error?: string; hash?: Hash };
 
-/** One user action on a Pool, the Basket or a credit line: switch chain if needed, approve if needed, simulate, send, wait, refresh. */
+/** One user action on a round: switch chain if needed, approve if needed, simulate, send, wait, refresh. */
 export function useTx() {
   const client = usePublicClient({ chainId: CHAIN_ID });
   const queryClient = useQueryClient();
@@ -62,21 +62,15 @@ export function useTx() {
 }
 
 const KNOWN: Record<string, string> = {
-  PoolDeviation: "The pool price is more than 2% away from Chainlink right now. Try again once it settles.",
-  SwapLoss: "Selling the stock part would lose more than the Pool allows. Try a smaller amount, or withdraw in kind.",
-  Slippage: "The amounts moved while you were signing. Try again.",
-  Unpriced: "Chainlink’s price is not fresh right now (market closed or a corporate action). Withdrawing in kind still works.",
-  StalePrice: "Chainlink’s price is not fresh right now (market closed or a corporate action). Repaying still works.",
-  Unhealthy: "That would take the line past its max loan-to-value.",
-  Healthy: "This account is healthy; it cannot be liquidated.",
-  InsufficientCash: "The credit line does not hold that much USDG right now.",
-  CapExceeded: "That would go over the cap.",
-  ZeroAmount: "Enter an amount.",
-  EnforcedPause: "Paused by the guardian right now. Exits still work.",
-  ERC4626ExceededMaxDeposit: "More than the Pool can take right now (its cap, or the price is not fresh).",
-  ERC4626ExceededMaxWithdraw: "More than you can withdraw right now.",
-  ERC4626ExceededMaxRedeem: "More shares than you hold.",
-  ERC20InsufficientBalance: "Not enough balance in your wallet.",
+  TooLate: "Deposits for this round have closed. The next round is open for deposits.",
+  TooEarly: "Not yet: that happens at the round's lock or end time.",
+  WrongState: "The round has moved on (locked, settled or void). Refresh the page.",
+  SeriesPausedError: "New deposits in this stock are paused. Withdrawals and claims still work.",
+  BelowMinimum: "Below the minimum deposit for this stock.",
+  Insufficient: "More than you deposited on that side.",
+  NothingToClaim: "Nothing to claim in that round right now.",
+  BadPriceRound: "That Chainlink round is not the first one after the round's time.",
+  ERC20InsufficientBalance: "Not enough of that stock in your wallet.",
   ERC20InsufficientAllowance: "The approval did not go through. Try again.",
 };
 

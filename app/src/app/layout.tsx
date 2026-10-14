@@ -5,9 +5,9 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3000");
-const TITLE = `${BRAND.name}: earn the trading fees of Robinhood Stock Tokens`;
+const TITLE = `${BRAND.name}: Shield or Boost a Robinhood Stock Token`;
 const DESCRIPTION =
-  "Deposit USDG into a stock’s Pool and earn the fees traders pay to swap it on Uniswap v4, in a range kept around Chainlink’s price. One deposit across every Pool with the Basket, or borrow against your Pool shares.";
+  "Weekly rounds on Robinhood Stock Tokens. Shield gets its dollars back plus a fixed coupon; Boost takes the upside of the whole pool and the first losses. Settled at Chainlink's price, paid in the stock, fully backed.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),

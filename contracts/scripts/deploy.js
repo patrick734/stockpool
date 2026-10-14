@@ -1,59 +1,70 @@
-// Deploys Stockpool. See scripts/stockpool.js for what goes out.
+// Deploys Stockpool (Shield & Boost). See scripts/stockpool.js for what goes out.
 //   Robinhood Chain (launch.sh):   npx hardhat run scripts/deploy.js --network robinhood
-//   Local demo (seeded):           npx hardhat run scripts/deploy.js --network localhost   (or --network keeper)
-// Live roles come from the environment launch.sh sets: ADMIN_MULTISIG (the dev wallet: the timelock's proposer and
-// executor), GUARDIAN_MULTISIG (also the dev wallet) and KEEPER_ADDRESS. Started again after a dropped connection,
-// it continues where it stopped.
+//   Rehearsal on a fork:           FORK=1 npx hardhat run scripts/deploy.js   (launch.sh --rehearsal)
+//   Local demo (seeded):           npx hardhat run scripts/deploy.js --network localhost
+// Live roles come from the environment launch.sh sets: DEPLOYER_ADDRESS (the dev wallet: owner of everything and
+// BuyBurn's guardian) and KEEPER_ADDRESS. Started again after a dropped connection, it continues where it stopped.
 const fs = require("fs");
 const path = require("path");
 const { ethers, network } = require("hardhat");
 const { deployStockpool, DEMO_PRICES } = require("./stockpool");
+const { nextLockAt } = require("../lib/schedule");
 
-const LIVE = network.name === "robinhood";
-const usdgUnits = (n) => ethers.parseUnits(String(n), 6);
+const FORK = network.name === "hardhat" && Boolean(process.env.FORK);
+const LIVE = network.name === "robinhood" || FORK;
 const wad = (n) => ethers.parseEther(String(n));
 const send = async (p) => (await p).wait();
 
 async function main() {
   const dir = path.join(__dirname, "..", "deployments");
-  const file = path.join(dir, `${network.name}.json`);
-  const progressFile = path.join(dir, `${network.name}.progress.json`);
-  if (fs.existsSync(file) && !fs.existsSync(progressFile) && process.env.FORCE !== "1") {
+  const label = FORK ? "fork" : network.name;
+  const file = path.join(dir, `${label}.json`);
+  const progressFile = path.join(dir, `${label}.progress.json`);
+  if (FORK) fs.rmSync(progressFile, { force: true });
+  if (fs.existsSync(file) && !fs.existsSync(progressFile) && process.env.FORCE !== "1" && !FORK) {
     console.log(`Already deployed: ${path.relative(process.cwd(), file)}. Nothing to do.`);
     return;
   }
   const signers = await ethers.getSigners();
-  const signer = signers[0];
-  if (!signer) throw new Error("No dev wallet signer: keystore ~/.foundry/keystores/stockpool-dev (or DEPLOYER_ACCOUNT) not found.");
-  const roles = LIVE
-    ? { admin: required("ADMIN_MULTISIG"), guardian: required("GUARDIAN_MULTISIG"), keeper: required("KEEPER_ADDRESS") }
-    : { admin: signer.address, guardian: signer.address, keeper: signers[3].address };
+  let signer = signers[0];
+  let roles;
+  if (FORK) {
+    // The rehearsal acts as the real dev wallet on a local copy of the chain: same addresses, nothing sent.
+    const dev = required("DEPLOYER_ADDRESS");
+    await network.provider.send("hardhat_setBalance", [dev, "0x56BC75E2D63100000"]);
+    signer = await ethers.getImpersonatedSigner(dev);
+    roles = { admin: dev, guardian: dev, keeper: required("KEEPER_ADDRESS") };
+  } else if (LIVE) {
+    if (!signer) throw new Error("No dev wallet signer: keystore ~/.foundry/keystores/stockpool-dev2 (or DEPLOYER_ACCOUNT) not found.");
+    roles = { admin: signer.address, guardian: signer.address, keeper: required("KEEPER_ADDRESS") };
+  } else {
+    roles = { admin: signer.address, guardian: signer.address, keeper: signers[3].address };
+  }
 
   const token = LIVE ? process.env.TOKEN_ADDRESS || null : null;
   const { d, env } = await deployStockpool({ signer, roles, live: LIVE, progressFile, token });
   if (!LIVE) await localToken(signer, d, env);
-  if (!LIVE) await seedLocal(d, signers);
+  if (!LIVE) await seedLocal(d, env, signers);
+  if (FORK) await rehearse(d, signer);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, JSON.stringify(d, null, 2) + "\n");
   fs.rmSync(progressFile, { force: true });
   console.log(`\nWrote ${path.relative(process.cwd(), file)}`);
-  console.log(`Next: the timelock accepts ownership of ${d.pendingTimelockAcceptances.length} contracts (./govern.sh handoff).`);
 }
 
 function required(name) {
   const v = process.env[name];
-  if (!v || !ethers.isAddress(v)) throw new Error(`${name} must be set to an address for a live deploy`);
-  return v;
+  if (!v || !ethers.isAddress(v)) throw new Error(`${name} must be set to an address`);
+  return ethers.getAddress(v);
 }
 
-/** Local demo token: $SPOOL at 0.01 USDG on the mock venue, plugged into BuyBurn like set-token.sh does live. */
+/** Local demo token: $SPOOL on the mock venue, plugged into BuyBurn like set-token.sh does live. */
 async function localToken(signer, d, env) {
   const t = await (await ethers.getContractFactory("MockERC20", signer)).deploy("Stockpool", "SPOOL", 18);
   await t.waitForDeployment();
   const swap = await ethers.getContractAt("MockSwapAdapter", env.swap, signer);
   await send(t.mint(signer.address, wad(1_000_000_000)));
   await send(t.mint(swap, wad(100_000_000)));
-  await send(swap.setRate(env.usdg, t, 10n ** 32n));
   for (const [ticker, m] of Object.entries(env.markets)) await send(swap.setRate(m.token, t, wad(Math.round(DEMO_PRICES[ticker] * 100))));
   const bb = await ethers.getContractAt("StockpoolBuyBurn", d.buyBurn, signer);
   await send(bb.setToken(t));
@@ -63,49 +74,81 @@ async function localToken(signer, d, env) {
   d.tokenSetter = null;
 }
 
-/** Gives the local demo something to show: Pool deposits in range, fees, funded credit lines with a loan, a Basket. */
-async function seedLocal(d, signers) {
-  const [, , , keeper, demo, borrower] = signers;
+/** Gives the local demo a history: per stock, one settled round, one running and one open for deposits. */
+async function seedLocal(d, env, signers) {
+  const [dev, , , keeper, demo, other] = signers;
   console.log("Seeding the local demo");
-  const usdg = await ethers.getContractAt("MockERC20", d.usdg);
-  for (const who of [demo, borrower]) await send(usdg.mint(who.address, usdgUnits(500_000)));
-  const amounts = { NVDA: 14_900, TSLA: 12_400, AAPL: 8_800, META: 11_200, GOOGL: 6_300, MSFT: 9_600, SPY: 10_100 };
-  for (const [t, w] of Object.entries(d.liquidityVaults)) {
-    const vault = await ethers.getContractAt("StockpoolVault", w.vault);
-    const amount = amounts[t] ?? 5_000;
-    await send(usdg.connect(demo).approve(vault, usdgUnits(amount)));
-    await send(vault.connect(demo).deposit(usdgUnits(amount), demo.address));
-    // A range about 12% either side of the demo price, in the ticks of a stock/USDG pool with the stock as token0.
-    const mid = Math.floor(Math.log((DEMO_PRICES[t] * 1e6) / 1e18) / Math.log(1.0001));
-    const lower = Math.floor((mid - 1200) / 60) * 60;
-    const upper = Math.ceil((mid + 1200) / 60) * 60;
-    await send(vault.connect(keeper).rebalance(lower, upper, true, usdgUnits(amount / 2), "0x"));
-    const position = await ethers.getContractAt("MockPosition", w.position);
-    const fee = amount * 0.0021;
-    await send(position.accrueFees(wad((fee / DEMO_PRICES[t]).toFixed(6)), usdgUnits(fee.toFixed(2))));
-    await send(vault.harvest());
+  const rounds = await ethers.getContractAt("StockpoolRounds", d.rounds);
+  const moves = { NVDA: 0.062, TSLA: -0.081, AAPL: 0.014, META: 0.037, GOOGL: -0.022, MSFT: 0.009, SPY: 0.011 };
+  const stocks = {};
+  for (const [t, s] of Object.entries(d.series)) {
+    const stock = await ethers.getContractAt("MockStockToken", s.token);
+    for (const who of [demo, other]) {
+      await send(stock.mint(who.address, wad(500)));
+      await send(stock.connect(who).approve(rounds, ethers.MaxUint256));
+    }
+    stocks[t] = { stock, feed: await ethers.getContractAt("MockAggregator", s.feed), price: DEMO_PRICES[t] };
   }
-  for (const [t, desk] of Object.entries(d.creditLines)) {
-    const c = await ethers.getContractAt("StockpoolCreditDesk", desk);
-    await send(usdg.connect(demo).approve(c, usdgUnits(6_000)));
-    await send(c.connect(demo).deposit(usdgUnits(6_000), demo.address));
-    const vault = await ethers.getContractAt("StockpoolVault", await c.vault());
-    await send(usdg.connect(borrower).approve(vault, usdgUnits(3_000)));
-    await send(vault.connect(borrower).deposit(usdgUnits(3_000), borrower.address));
-    const shares = ((await vault.totalSupply()) * 25n) / 100n;
-    const mine = await vault.balanceOf(borrower.address);
-    const pledge = shares < mine ? shares : mine;
-    await send(vault.connect(borrower).approve(c, pledge));
-    await send(c.connect(borrower).pledge(pledge));
-    await send(c.connect(borrower).borrow(usdgUnits(t === "META" ? 900 : 600), borrower.address));
+  const deposits = async () => {
+    for (const s of Object.values(d.series)) {
+      const id = (await rounds.series(s.id)).lastRound;
+      const n = Number(id) % 3;
+      await send(rounds.connect(demo).deposit(id, 0, wad(6 + n * 2)));
+      await send(rounds.connect(other).deposit(id, 0, wad(9 - n)));
+      await send(rounds.connect(demo).deposit(id, 1, wad(3 + n)));
+      await send(rounds.connect(other).deposit(id, 1, wad(2)));
+    }
+  };
+  const travel = async (to) => {
+    await ethers.provider.send("evm_setNextBlockTimestamp", [to]);
+    await ethers.provider.send("evm_mine", []);
+  };
+  const price = async (t, usd) => {
+    await send(stocks[t].feed.connect(dev).setAnswer(Math.round(usd * 1e8)));
+    return stocks[t].feed.latestId();
+  };
+
+  const running = {}; // the locked round of each stock
+  await deposits(); // round 1 of every stock
+  for (let step = 0; step < 2; step++) {
+    const first = await rounds.round((await rounds.series(0)).lastRound);
+    const lockAt = Number(first.lockAt);
+    await travel(lockAt + 60);
+    for (const [t, s] of Object.entries(d.series)) {
+      const id = (await rounds.series(s.id)).lastRound;
+      // One round ends exactly when the next locks, so one Chainlink round prices both.
+      if (step > 0) stocks[t].price *= 1 + moves[t];
+      const cl = await price(t, stocks[t].price);
+      if (running[t]) await send(rounds.settle(running[t], cl));
+      await send(rounds.lock(id, cl));
+      running[t] = id;
+      await send(rounds.connect(keeper).openRound(s.id, nextLockAt(lockAt + 60)));
+    }
+    await deposits();
   }
-  const basket = await ethers.getContractAt("StockpoolBasket", d.basket);
-  await send(usdg.connect(demo).approve(basket, usdgUnits(12_000)));
-  await send(basket.connect(demo).deposit(usdgUnits(12_000), demo.address));
-  const pools = await basket.pools();
-  const each = usdgUnits(Math.floor(9_000 / pools.length));
-  for (const p of pools) await send(basket.connect(keeper).allocate(p, each));
+  // a settled round leaves fees in BuyBurn: spend some, as the keeper would
+  const bb = await ethers.getContractAt("StockpoolBuyBurn", d.buyBurn);
+  for (const s of Object.values(d.series)) {
+    const stock = await ethers.getContractAt("MockStockToken", s.token);
+    const bal = await stock.balanceOf(d.buyBurn);
+    if (bal > 0n) {
+      await send(bb.connect(keeper).buyAndBurn(s.token, bal, 1, "0x"));
+      break;
+    }
+  }
   d.demoUser = demo.address;
+}
+
+/** Fork rehearsal: plays one round with the real Stock Tokens and Chainlink feeds' answers. */
+async function rehearse(d, dev) {
+  console.log("Rehearsal: checking every series reads its Chainlink feed");
+  for (const [t, s] of Object.entries(d.series)) {
+    const feed = await ethers.getContractAt("AggregatorV3Interface", s.feed);
+    const [id, answer, , updatedAt] = await feed.latestRoundData();
+    console.log(`  ${t.padEnd(6)} $${(Number(answer) / 1e8).toFixed(2)} (round ${id}, ${new Date(Number(updatedAt) * 1000).toUTCString()})`);
+  }
+  const rounds = await ethers.getContractAt("StockpoolRounds", d.rounds, dev);
+  console.log(`  ${await rounds.roundCount()} rounds open; owner ${await rounds.owner()}; operator ${await rounds.operator()}`);
 }
 
 main().catch((e) => {

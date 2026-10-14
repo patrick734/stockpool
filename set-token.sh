@@ -11,7 +11,7 @@ TOKEN="${1:-}"
 . "$ROOT/tools/env.sh"
 load_launch_env "$ROOT/launch.env"
 [ -n "${ROBINHOOD_RPC_URL:-}" ] && export ROBINHOOD_RPC_URL
-export DEPLOYER_ACCOUNT="${DEPLOYER_ACCOUNT:-stockpool-dev}" TOKEN_ADDRESS="$TOKEN"
+export DEPLOYER_ACCOUNT="${DEPLOYER_ACCOUNT:-stockpool-dev2}" TOKEN_ADDRESS="$TOKEN"
 DEV="$(node "$ROOT/tools/wallet.js" address "$DEPLOYER_ACCOUNT")" || stop "Could not unlock the dev wallet keystore."
 printf '\n\033[33mThis permanently sets the token to %s (from the dev wallet %s). It can never be changed.\033[0m\n' "$TOKEN" "$DEV"
 read -r -p "Type SET to continue: " ans; [ "$ans" = "SET" ] || stop "Cancelled."

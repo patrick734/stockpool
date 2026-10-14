@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Stockpool launch: deploys everything from ONE dev wallet and writes the addresses into the website.
-#   Timelock (48h), swap adapter, BuyBurn, oracle, fee router, registry, a Pool for every stock with a usable
-#   Uniswap v4 pool, the credit lines and the Basket. The dev wallet is the timelock's proposer and executor and the
-#   guardian; the keeper is a separate bot wallet.
+# Stockpool launch: deploys Shield & Boost from ONE dev wallet and writes the addresses into the website.
+#   The swap adapter, BuyBurn and StockpoolRounds, one series per Stock Token, and each series' first weekly round.
+#   The dev wallet owns all three; the keeper is a separate bot wallet that opens, locks and settles rounds.
 #
-#   ./launch.sh --rehearsal   on a local copy of Robinhood Chain: deploys, then deposits, places ranges, withdraws,
-#                             fills the Basket and borrows with what it deployed, and prints the cost. Spends nothing.
+#   ./launch.sh --rehearsal   on a local copy of Robinhood Chain, acting as your dev wallet: spends nothing.
 #   ./launch.sh               the real deploy. If it stops halfway, run it again: it continues where it stopped.
 #
-# Signs from ~/.foundry/keystores/$DEPLOYER_ACCOUNT (default stockpool-dev, made by
-# `node tools/import-key.js stockpool-dev`), unlocked with ~/.foundry/stockpool.pw. No key is typed or printed.
+# Signs from ~/.foundry/keystores/$DEPLOYER_ACCOUNT (default stockpool-dev2, made by
+# `node tools/import-key.js stockpool-dev2`), unlocked with ~/.foundry/stockpool.pw. No key is typed or printed.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 C="$ROOT/contracts"
@@ -24,13 +22,13 @@ for d in "$C" "$ROOT/keeper"; do [ -d "$d/node_modules" ] || (cd "$d" && npm ins
 [ -f "$ROOT/launch.env" ] && { load_launch_env "$ROOT/launch.env"; echo "Loaded launch.env"; }
 [[ "${KEEPER_ADDRESS:-}" =~ ^0x[0-9a-fA-F]{40}$ ]] || stop "KEEPER_ADDRESS is not set in launch.env (node tools/wallet.js keeper-secret prints it)."
 [ -n "${ROBINHOOD_RPC_URL:-}" ] && export ROBINHOOD_RPC_URL
-export DEPLOYER_ACCOUNT="${DEPLOYER_ACCOUNT:-stockpool-dev}"
+export DEPLOYER_ACCOUNT="${DEPLOYER_ACCOUNT:-stockpool-dev2}"
 [ -f "$HOME/.foundry/keystores/$DEPLOYER_ACCOUNT" ] || stop "No dev wallet keystore ~/.foundry/keystores/$DEPLOYER_ACCOUNT. Create it with: node tools/import-key.js $DEPLOYER_ACCOUNT"
 DEV="$(node "$ROOT/tools/wallet.js" address "$DEPLOYER_ACCOUNT")" || stop "Could not unlock the dev wallet keystore."
 lc() { echo "$1" | tr A-F a-f; }
 [ "$(lc "$KEEPER_ADDRESS")" != "$(lc "$DEV")" ] || stop "The keeper must be a separate wallet from the dev wallet."
-export DEPLOYER_ADDRESS="$DEV" ADMIN_MULTISIG="$DEV" GUARDIAN_MULTISIG="$DEV" KEEPER_ADDRESS
-echo "Dev wallet: $DEV (deployer, timelock proposer/executor, guardian)"
+export DEPLOYER_ADDRESS="$DEV" KEEPER_ADDRESS
+echo "Dev wallet: $DEV (deploys and owns the contracts)"
 echo "Keeper:     $KEEPER_ADDRESS"
 
 OUT="$C/deployments/robinhood.json"
@@ -48,12 +46,13 @@ node scripts/preflight.js || stop "Preflight failed. Fix the FAIL lines above an
 
 if [ $REHEARSAL = 1 ]; then
   step "Rehearsal on a local copy of Robinhood Chain"
-  FORK=1 npx hardhat run scripts/rehearse.js 2>&1 | grep -v '^\s\+at '
-  [ "${PIPESTATUS[0]}" = 0 ] || stop "Rehearsal failed. Read the FAIL lines above (a dropped RPC connection: run it again)."
+  FORK=1 npx hardhat run scripts/deploy.js 2>&1 | grep -v '^\s\+at '
+  [ "${PIPESTATUS[0]}" = 0 ] || stop "Rehearsal failed. Read the lines above (a dropped RPC connection: run it again)."
+  rm -f "$C/deployments/fork.json"
   step "Rehearsal complete. Nothing was sent to Robinhood Chain."; exit 0
 fi
 
-printf '\n\033[33mThis deploys Stockpool to Robinhood Chain with real gas from %s.\033[0m\n' "$DEV"
+printf '\n\033[33mThis deploys Stockpool (Shield & Boost) to Robinhood Chain with real gas from %s.\033[0m\n' "$DEV"
 read -r -p "Type DEPLOY to continue: " ans; [ "$ans" = "DEPLOY" ] || stop "Cancelled."
 
 step "Deploying"
@@ -73,5 +72,5 @@ step "Deployed"
 echo "Next:"
 echo "  1. Push (keeper and addresses): git add -A && git commit -m Deploy && git push"
 echo "  2. Publish the source code: ./verify.sh"
-echo "  3. Timelock handoff, now and again after 48h: ./govern.sh handoff"
-echo "  4. After the handoff is complete: Vercel, then GitHub repository variable KEEPER_LIVE=1 (docs/LAUNCH.md)"
+echo "  3. Launch \$SPOOL on Pons from the dev wallet, then: ./set-token.sh 0xTOKEN"
+echo "  4. Vercel redeploys from the push; GitHub repository variable KEEPER_LIVE=1 (docs/LAUNCH.md)"

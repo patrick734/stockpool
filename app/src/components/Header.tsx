@@ -4,14 +4,12 @@ import { useId } from "react";
 import { usePathname } from "next/navigation";
 import { useAccount, useDisconnect } from "wagmi";
 import { BRAND } from "@/lib/brand";
-import { CHAIN_ID, CREDIT_LINES } from "@/lib/config";
+import { CHAIN_ID } from "@/lib/config";
 import { short } from "@/lib/format";
 import { useOpenWallet } from "./Wallet";
 
 const LINKS = [
-  { href: "/", label: "Pools" },
-  { href: "/basket/", label: "Basket" },
-  { href: "/borrow/", label: "Borrow", needs: () => CREDIT_LINES.length > 0 },
+  { href: "/", label: "Rounds" },
   { href: "/portfolio/", label: "Portfolio" },
   { href: "/docs/", label: "Docs" },
 ];
@@ -21,7 +19,7 @@ export function Header() {
   const { address, isConnected, chainId } = useAccount();
   const { disconnect } = useDisconnect();
   const openWallet = useOpenWallet();
-  const on = (href: string) => (href === "/" ? path === "/" || path.startsWith("/pool") : path.startsWith(href));
+  const on = (href: string) => (href === "/" ? path === "/" || path.startsWith("/stock") : path.startsWith(href));
   return (
     <header className="masthead">
       <div className="frame masthead-row">
@@ -30,7 +28,7 @@ export function Header() {
           <span>{BRAND.name}</span>
         </a>
         <nav className="menu" aria-label="Main">
-          {LINKS.filter((l) => !l.needs || l.needs()).map((l) => (
+          {LINKS.map((l) => (
             <a key={l.href} href={l.href} aria-current={on(l.href) ? "page" : undefined}>
               {l.label}
             </a>
@@ -81,9 +79,8 @@ export function Footer() {
           <p>{BRAND.tagline}</p>
         </div>
         <nav aria-label="Footer">
-          <a href="/">Pools</a>
-          <a href="/basket/">Basket</a>
-          <a href="/borrow/">Borrow</a>
+          <a href="/">Rounds</a>
+          <a href="/portfolio/">Portfolio</a>
           <a href="/docs/">Docs</a>
           <a href="/docs/#contracts">Contracts</a>
           {BRAND.x && (

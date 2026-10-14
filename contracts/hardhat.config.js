@@ -12,7 +12,7 @@ const RPC = ROBINHOOD_RPC_URL || "https://rpc.mainnet.chain.robinhood.com";
 // password file. The key is decrypted in memory only, only for --network robinhood, and never printed or written.
 function deployerAccounts() {
   if (!process.argv.includes("robinhood") && process.env.HARDHAT_NETWORK !== "robinhood") return [];
-  const ks = path.join(os.homedir(), ".foundry", "keystores", DEPLOYER_ACCOUNT || "stockpool-dev");
+  const ks = path.join(os.homedir(), ".foundry", "keystores", DEPLOYER_ACCOUNT || "stockpool-dev2");
   if (!fs.existsSync(ks)) return [];
   const pw = DEPLOYER_PASSWORD_FILE || path.join(os.homedir(), ".foundry", "stockpool.pw");
   const { Wallet } = require("ethers");

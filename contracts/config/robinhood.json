@@ -127,7 +127,7 @@
     }
   },
   "launch": {
-    "pools": [
+    "series": [
       "NVDA",
       "TSLA",
       "AAPL",
@@ -136,38 +136,18 @@
       "MSFT",
       "SPY"
     ],
+    "rounds": {
+      "couponBps": 100,
+      "feeBps": 500,
+      "maxRatioBps": 30000,
+      "durationDays": 7,
+      "minDeposit": "0.001",
+      "lockWeekdayUtc": 1,
+      "lockHourUtc": 14,
+      "minLeadHours": 24
+    },
     "poolMinLiquidity": "100000000000000000",
-    "poolMaxFee": 3000,
-    "poolCapUsdg": 25000,
-    "creditLines": [
-      "META",
-      "NVDA"
-    ],
-    "creditLine": {
-      "supplyCapUsdg": 10000,
-      "borrowCapUsdg": 5000,
-      "risk": {
-        "ltvBps": 4000,
-        "liquidationThresholdBps": 5500,
-        "liquidationBonusBps": 600,
-        "closeFactorBps": 5000,
-        "maxCollateralShareBps": 3000,
-        "reserveFactorBps": 1000
-      },
-      "rates": {
-        "baseRatePerYear": "0.02",
-        "slope1PerYear": "0.06",
-        "slope2PerYear": "1.0",
-        "kinkUtilization": "0.8"
-      }
-    },
-    "basket": {
-      "capUsdg": 50000,
-      "maxAllocationBps": 4000
-    },
     "buyBurnMinIntervalSeconds": 3600,
-    "buyBurnMaxUsdgPerRun": 250,
-    "buyBurnMaxStockPerRun": "0.5",
-    "timelockDelaySeconds": 172800
+    "buyBurnMaxStockPerRun": "0.5"
   }
 }

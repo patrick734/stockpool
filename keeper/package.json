@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Keeper for Stockpool: Pool rebalances and harvests, Basket allocation, credit-line reserves, fee routing, buy and burn",
+  "description": "Keeper for Stockpool Shield & Boost: locks, settles and opens rounds; buys and burns $SPOOL with the fees",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "once": "node src/index.js --once",
-    "test": "node scripts/unit.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "test": "node scripts/smoke.js"
   },
   "engines": {
     "node": ">=18"

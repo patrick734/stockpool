@@ -65,7 +65,7 @@ async function main() {
   const file = path.join(__dirname, "..", "deployments", `${label}.json`);
   if (!fs.existsSync(file)) throw new Error(`No deployment file ${file}. Deploy first.`);
   const [signer] = await ethers.getSigners();
-  if (!signer) throw new Error("No dev wallet signer: keystore ~/.foundry/keystores/stockpool-dev (or DEPLOYER_ACCOUNT) not found.");
+  if (!signer) throw new Error("No dev wallet signer: keystore ~/.foundry/keystores/stockpool-dev2 (or DEPLOYER_ACCOUNT) not found.");
   await setToken(file, process.env.TOKEN_ADDRESS, signer);
 }
 

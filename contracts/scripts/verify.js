@@ -201,18 +201,9 @@ async function main() {
   const d = JSON.parse(fs.readFileSync(DEPLOYMENT, "utf8"));
   const plan = [];
   const add = async (label, name, address) => address && plan.push(await vaultContract(label, name, address));
-  await add("StockpoolTimelock", "StockpoolTimelock", d.timelock);
   await add("StockpoolSwapAdapter", "StockpoolSwapAdapter", d.swapAdapter);
   await add("StockpoolBuyBurn", "StockpoolBuyBurn", d.buyBurn);
-  await add("StockpoolOracle", "StockpoolOracle", d.oracle);
-  await add("StockpoolFeeRouter", "StockpoolFeeRouter", d.feeRouter);
-  await add("StockpoolRegistry", "StockpoolRegistry", d.registry);
-  for (const [t, v] of Object.entries(d.liquidityVaults || {})) {
-    await add(`StockpoolVault ${t}`, "StockpoolVault", v.vault);
-    await add(`StockpoolPosition ${t}`, "StockpoolPosition", v.position);
-  }
-  for (const [t, desk] of Object.entries(d.creditLines || {})) await add(`StockpoolCreditDesk ${t}`, "StockpoolCreditDesk", desk);
-  await add("StockpoolBasket", "StockpoolBasket", d.basket);
+  await add("StockpoolRounds", "StockpoolRounds", d.rounds);
 
   // Published source must not carry anything from this Mac (user name, folders).
   const home = os.homedir();

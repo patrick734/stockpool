@@ -1,74 +1,31 @@
 # Stockpool keeper
 
-A small Node.js bot (ethers v6) that does Stockpool's routine work, one cycle at a time.
+One cycle, for every stock with a series:
 
-| Duty | Calls | Who may call |
-|---|---|---|
-| Basket: keep about 20% in USDG, move the rest into the Pools that hold the least | `allocate`, `deallocate` | keeper |
-| Pools: keep each range around the Chainlink price, collect fees | `rebalance`, `harvest` | keeper / anyone |
-| Credit lines: claim reserves | `claimReserves` | anyone |
-| Forward the Pools' fee share and credit-line reserves, then buy and burn $SPOOL | `FeeRouter.routeMany`, `BuyBurn.buyAndBurn` | anyone / keeper |
+1. **Lock** each round whose deposits have closed, with the first Chainlink round at or after its lock time (found by a
+   binary search over the feed's current phase). A round with an empty side is locked without a price: it voids itself.
+2. **Settle** each round that has ended, with the first Chainlink round at or after its end time. One round ends exactly
+   when the next one locks, so the same Chainlink round prices both.
+3. **Open** the next round as soon as the last one has locked, locking on the next Monday 14:00 UTC
+   (`contracts/lib/schedule.js`).
+4. **Void** a round that could not be locked or settled within 7 days (`voidStale`), which refunds every deposit.
 
-Every call is simulated from the keeper address first. A call whose simulation reverts is logged and skipped, so one
-failing Pool or credit line never stops the rest of the cycle.
+Then **BuyBurn**: the fees (Stock Tokens) are sold for $SPOOL through the swap adapter and burned, at most one buy per
+hour, each capped per token. The quote is a simulation of the real call; the minimum output allows 2% slippage.
 
-## Running
+Locking and settling are open to anyone and the prices are fixed by the contract, so when the keeper runs never changes
+a result. Opening rounds needs the operator role, which the keeper wallet holds.
 
-The keeper reads ABIs from `contracts/artifacts` (run `npx hardhat compile` there first) and addresses from
-`contracts/deployments/<KEEPER_NETWORK>.json`.
-
-```bash
-node src/index.js --once                                   # dry run: simulates, sends nothing
-DRY_RUN=0 KEEPER_PRIVATE_KEY=... node src/index.js         # live, looping
+```
+npm install
+DRY_RUN=1 node src/index.js --once          # simulate one cycle against Robinhood Chain
+KEEPER_PRIVATE_KEY=... DRY_RUN=0 node src/index.js   # loop, sending transactions
 ```
 
-**Recommended:** GitHub Actions (`.github/workflows/keeper.yml`). The key lives only in the repository secret
-`KEEPER_PRIVATE_KEY`, created by `node tools/wallet.js keeper-secret`, which prints the address and never the key. The
-workflow runs a cycle about every 15 minutes and stays in dry-run mode until the repository variable `KEEPER_LIVE` is `1`.
+Settings: `config.json` (override with `KEEPER_CONFIG=file.json`). Environment: `RPC_URL`, `KEEPER_NETWORK`
+(deployment file name, default `robinhood`), `KEEPER_PRIVATE_KEY`, `DRY_RUN` (anything but `0` simulates).
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `KEEPER_PRIVATE_KEY` | none | Required when `DRY_RUN=0`. Read from the environment only, never logged. |
-| `DRY_RUN` | dry run | Only `DRY_RUN=0` sends transactions. |
-| `RPC_URL` | public Robinhood RPC | JSON-RPC endpoint. |
-| `KEEPER_NETWORK` | `robinhood` | Picks the deployment file. |
-| `KEEPER_CONFIG` | none | JSON file merged over `config.json`. |
-| `KEEPER_STATE_FILE` | none | Keeps harvest times and scan positions between one-shot runs. |
-| `LOG_JSON`, `LOG_LEVEL` | off, `info` | Log format and verbosity. |
+On GitHub Actions (`.github/workflows/keeper.yml`) it runs one cycle every 15 minutes, dry until the repository variable
+`KEEPER_LIVE` is `1`.
 
-## Settings (`config.json`)
-
-- `basket`: the share kept in USDG (`idlePct`) and the smallest move worth a transaction (`minMoveUsdg`).
-- `rebalance` and `harvest`: range width (`halfWidthTicks`, 1200 ticks is about 12% either side), when to re-centre,
-  how often to collect fees.
-- `creditLines`: reserve claims.
-- `buyBurn.defaultRoute` is `["IN","USDG","ETH","TOKEN"]`: the fee token, USDG, native ETH, then the token's Pons pool.
-
-Until the token's Pons pool is registered on the swap adapter (`./govern.sh register-pool`, after graduation),
-buy-and-burn quotes revert and fees simply wait in BuyBurn.
-
-## Tests
-
-```bash
-npm test                                         # offline: tick math, rebalance planning, routes
-```
-
-End to end against a local node (port 8547):
-
-```bash
-cd ../contracts && npx hardhat node --port 8547                 # terminal 1
-npx hardhat run scripts/deploy.js --network keeper             # terminal 2
-cd ../keeper && npm run smoke
-```
-
-The smoke test runs a dry cycle (asserts nothing was sent), a live cycle (the Basket allocates, Pools rebalance and
-harvest, fees are bought and burned), and a cycle two days later at a new price (Pools re-centre, credit-line interest
-accrues and reserves are claimed). It only runs on chain id 31337.
-
-## Safety
-
-- Nothing is sent unless `DRY_RUN=0`.
-- The keeper key holds only the keeper role plus gas. The contracts bound what it can do: registered pools and
-  swap-loss limits on rebalances, Basket moves only between the Basket and its listed Pools, per-run caps and a minimum
-  interval on buy-and-burn. The guardian can pause the Pools, the Basket and buy-and-burn.
-- Run one live keeper per key; nonces are managed locally.
+Smoke test against a local node: see the main README (`npm run smoke`).

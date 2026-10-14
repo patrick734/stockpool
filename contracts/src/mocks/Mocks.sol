@@ -5,7 +5,6 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IPoolPosition} from "../interfaces/IPoolPosition.sol";
 import {ISwapAdapter} from "../interfaces/ISwapAdapter.sol";
 
 // Test doubles for the unit tests and the local demo. Never deployed to a live network.
@@ -111,102 +110,6 @@ contract MockAggregator {
 
     function _id(uint16 p, uint64 n) private pure returns (uint80) {
         return uint80((uint256(p) << 64) | n);
-    }
-}
-
-/// @dev Holds tokens as "the range". Principal is its balance minus fees waiting to be collected.
-contract MockPosition is IPoolPosition {
-    MockERC20 public immutable stock;
-    MockERC20 public immutable usdg;
-    uint256 private immutable stockUnit;
-    address public vault;
-    uint256 public spotUsdgPerUnit;
-    uint256 public pendingStockFees;
-    uint256 public pendingUsdgFees;
-    uint256 public entries;
-
-    constructor(MockERC20 stock_, MockERC20 usdg_, uint256 spotUsdgPerUnit_) {
-        stock = stock_;
-        usdg = usdg_;
-        stockUnit = 10 ** stock_.decimals();
-        spotUsdgPerUnit = spotUsdgPerUnit_;
-    }
-
-    modifier onlyVault() {
-        require(msg.sender == vault, "only vault");
-        _;
-    }
-
-    function bind(address vault_) external {
-        require(vault == address(0), "bound");
-        vault = vault_;
-    }
-
-    function setSpot(uint256 spot) external {
-        spotUsdgPerUnit = spot;
-    }
-
-    function accrueFees(uint256 stockFees, uint256 usdgFees) external {
-        stock.mint(address(this), stockFees);
-        usdg.mint(address(this), usdgFees);
-        pendingStockFees += stockFees;
-        pendingUsdgFees += usdgFees;
-    }
-
-    function balances() public view returns (uint256, uint256) {
-        return (stock.balanceOf(address(this)) - pendingStockFees, usdg.balanceOf(address(this)) - pendingUsdgFees);
-    }
-
-    function spotUsdgValue(uint256 stockAmount) external view returns (uint256) {
-        return Math.mulDiv(stockAmount, spotUsdgPerUnit, stockUnit);
-    }
-
-    function enter(int24 lower, int24 upper) external onlyVault returns (uint128) {
-        ++entries;
-        tickLower = lower;
-        tickUpper = upper;
-        return 1;
-    }
-
-    // Range views the website reads, so the local demo shows its ranges. The mock "pool" sits mid-range.
-    int24 public tickLower;
-    int24 public tickUpper;
-
-    function liquidity() external view returns (uint128) {
-        (uint256 s, uint256 u) = balances();
-        return entries > 0 && (s > 0 || u > 0) ? 1 : 0;
-    }
-
-    function slot0() external view returns (uint160, int24) {
-        return (0, int24((int256(tickLower) + int256(tickUpper)) / 2));
-    }
-
-    function stockIsToken0() external pure returns (bool) {
-        return true;
-    }
-
-    function exitAll() external onlyVault returns (uint256 s, uint256 u) {
-        (s, u) = balances();
-        stock.transfer(vault, s);
-        usdg.transfer(vault, u);
-    }
-
-    function withdrawPortion(uint256 numerator, uint256 denominator) external onlyVault returns (uint256 s, uint256 u) {
-        (uint256 bs, uint256 bu) = balances();
-        if (numerator >= denominator) numerator = denominator;
-        s = Math.mulDiv(bs, numerator, denominator);
-        u = Math.mulDiv(bu, numerator, denominator);
-        stock.transfer(vault, s);
-        usdg.transfer(vault, u);
-    }
-
-    function collectFees() external onlyVault returns (uint256 s, uint256 u) {
-        s = pendingStockFees;
-        u = pendingUsdgFees;
-        pendingStockFees = 0;
-        pendingUsdgFees = 0;
-        if (s != 0) stock.transfer(vault, s);
-        if (u != 0) usdg.transfer(vault, u);
     }
 }
 

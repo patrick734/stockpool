@@ -1,7 +1,7 @@
 "use client";
 
 import { BRAND } from "@/lib/brand";
-import { CONTRACTS, CREDIT_LINES, POOLS, addressUrl } from "@/lib/config";
+import { CONTRACTS, SERIES, addressUrl } from "@/lib/config";
 import { Footer, Header } from "@/components/Header";
 
 const S = BRAND.token.symbol;
@@ -13,95 +13,92 @@ const TOPICS: { id: string; title: string; body: React.ReactNode }[] = [
     body: (
       <>
         <p>
-          Robinhood Stock Tokens trade on Uniswap v4 on Robinhood Chain. Every swap pays a fee to the people supplying the pool.
-          Stockpool turns that into a deposit: you put USDG into a stock’s Pool, and a keeper holds it as one concentrated range in that
-          stock’s USDG pool, centred on Chainlink’s price. The fees it earns compound into your shares.
-        </p>
-        <p>There are three ways in: a single Pool, the Basket (every Pool at once), and Borrow (loans against Pool shares, or lending).</p>
-      </>
-    ),
-  },
-  {
-    id: "pools",
-    title: "Pools",
-    body: (
-      <>
-        <p>
-          Each Pool is an ERC-4626 vault for one stock. Your shares are valued with Chainlink’s price for the stock, through Chainlink’s
-          USDG/USD feed, never with the pool’s own price. Deposits are refused while the pool is more than 2% away from Chainlink, so
-          nobody can push the pool to buy shares cheaply or sell them dearly.
+          Stockpool runs weekly rounds on Robinhood Stock Tokens. Holders of a stock pool it for one week and choose a side. <b>Shield</b> is owed the
+          dollar value it put in plus a fixed coupon, and is paid first. <b>Boost</b> gets everything left: the stock&apos;s upside on the whole pool,
+          and the first losses. Everything is paid in the same Stock Token that went in.
         </p>
         <p>
-          The keeper places the range about 12% either side of the price and moves it when the price walks toward an edge. Any swap it
-          makes to rebalance is checked against Chainlink and refused if it loses more than 1%. Each Pool has a deposit cap.
-        </p>
-        <p>
-          You can withdraw an exact amount of USDG while the price is live (if the Pool has to sell stock to pay you, that cost is
-          yours, at most 1%), or withdraw in kind at any time: your share of the stock and USDG, with no price and no swap.
+          It is fully backed: the two sides only ever split what was deposited. There is no borrowing, no liquidation and no debt, and nobody can move
+          the deposits.
         </p>
       </>
     ),
   },
   {
-    id: "basket",
-    title: "The Basket",
-    body: (
-      <p>
-        One deposit spread across every Pool. The keeper keeps about a fifth in USDG for withdrawals, tops up the Pools that hold the
-        least, and the contract refuses any move that would put more than 40% into one Pool. Withdrawals in USDG come from that
-        reserve. Like the Pools, the Basket takes deposits and pays USDG only while every Pool it holds has a fresh price and trades
-        within 2% of Chainlink. Withdrawing in kind always works and hands you your slice of the reserve plus your slice of each
-        Pool’s shares. The Basket charges no fee of its own.
-      </p>
-    ),
-  },
-  {
-    id: "borrow",
-    title: "Borrow and lend",
+    id: "round",
+    title: "A round",
     body: (
       <>
         <p>
-          Each credit line lends USDG against one Pool’s shares. Pledge shares (they keep earning) and borrow up to 40% of their value.
-          The rate moves with how much of the line is borrowed. If a loan grows past 55% of the shares’ value, anyone can repay up to half
-          of it and take shares worth 6% more than they repaid. A line can hold at most 30% of its Pool’s shares as collateral.
+          Each stock has one round open for deposits at a time. Deposits close at the lock time (Mondays, 14:00 UTC) and you can take them back until
+          then. The round then runs for seven days; the next round opens as soon as this one locks.
         </p>
         <p>
-          Lenders supply USDG and earn the interest, less a 10% reserve that goes to the fee router. Each line is isolated: bad debt in
-          one never reaches another. Borrowing needs a fresh Chainlink price; repaying never does.
+          At the lock, Shield is matched up to 3× Boost. If more Shield came in, each Shield deposit is matched pro rata and the rest is refunded
+          straight away (claim it from the Portfolio). A round where one side is empty is void and refunds everyone.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "math",
+    title: "How the pool splits",
+    body: (
+      <>
+        <p>With S Shield and B Boost (in the stock), start price P₀, end price P₁ and coupon c:</p>
+        <ul>
+          <li>Shield is owed S × P₀ × (1 + c) in dollars, paid in the stock at P₁: S × P₀ × (1 + c) ÷ P₁, never more than the whole pool S + B.</li>
+          <li>Boost gets the rest of the pool.</li>
+          <li>If Boost ends with more dollars than it put in, 5% of that profit is the protocol fee.</li>
+        </ul>
+        <p>
+          Example, 300 Shield and 100 Boost at $180 with a 1% coupon. Stock +10% to $198: Shield gets back its $54,000 plus $540, about 275.5 shares;
+          Boost gets about 124.5 shares, worth about +37% in dollars before the fee. Stock −10% to $162: Shield still gets $54,540 (336.7 shares) and
+          Boost about 63.3 shares, −43%. Shield only loses dollars if the stock falls so far that Boost is wiped out (about −24% here).
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "prices",
+    title: "Prices",
+    body: (
+      <>
+        <p>
+          Both prices come from the stock&apos;s Chainlink feed on Robinhood Chain: the start price is the first Chainlink update at or after the lock
+          time, the end price the first at or after the end time. The contract checks that the update before it is older than that time, so nobody can
+          pick a better price by choosing when to call. Locking and settling are open to anyone; the keeper does it for everyone.
+        </p>
+        <p>
+          Stock feeds pause over weekends and holidays, so the price used can be the next market update. If no usable price arrives within 7 days, the
+          round is void and every deposit is refunded.
         </p>
       </>
     ),
   },
   {
     id: "spool",
-    title: `Fees and $${S}`,
+    title: `$${S}`,
     body: (
       <>
         <p>
-          Of every swap fee a Pool earns, 70% stays in the Pool for its depositors and 30% goes to StockpoolFeeRouter, along with the
-          credit lines’ reserves. The router forwards everything to StockpoolBuyBurn.
-        </p>
-        <p>
-          StockpoolBuyBurn can only buy ${S} on its Pons pool and burn it. Runs are capped and at most hourly, and it has no withdraw
-          function. ${S} launches on Pons; until its pool is registered after graduation, fees wait in StockpoolBuyBurn.
+          The fee (5% of Boost&apos;s profit in a winning round) goes to StockpoolBuyBurn, which can only sell it for ${S} on its Pons pool and burn
+          what it buys. It has no withdraw function.
         </p>
       </>
     ),
   },
   {
-    id: "safety",
-    title: "Who can change what",
+    id: "control",
+    title: "Who controls what",
     body: (
       <>
         <p>
-          Every setting (caps, fee share, risk limits, price feeds, the Basket’s Pools) is changed through StockpoolTimelock, which makes
-          each change public for 48 hours before it can run.
+          The dev wallet owns the contracts. It can list a stock, set the terms of future rounds within hard limits (coupon at most 5%, fee at most 10%
+          of Boost&apos;s profit, Shield at most 10× Boost), pause new deposits, and cancel a round that has not settled, which refunds every deposit in
+          full (for a broken feed or a stock split). It cannot move deposits, change a round&apos;s terms once it is open, or take any part of a payout.
         </p>
-        <p>
-          The guardian can pause new deposits and borrowing and lower caps, never raise them. Withdrawals, withdrawals in kind and
-          repayments stay open while paused. The keeper can move a Pool’s range and the Basket’s money between its Pools, inside the
-          Chainlink checks; it can never send funds anywhere else.
-        </p>
+        <p>The keeper wallet can only open the next round. Withdrawals before the lock, claims and refunds never depend on either.</p>
       </>
     ),
   },
@@ -109,29 +106,28 @@ const TOPICS: { id: string; title: string; body: React.ReactNode }[] = [
     id: "risks",
     title: "Risks",
     body: (
-      <ul>
-        <li>A concentrated range earns more fees but sells into a falling stock and buys into a rising one, so a Pool can end up worth less than the USDG put in.</li>
-        <li>When a Chainlink stock price goes stale (its feed stops updating, as it does over weekends), deposits, USDG withdrawals and borrowing wait; withdrawing in kind does not.</li>
-        <li>Stock prices can jump when trading resumes. A loan past its limit can be liquidated at a discount.</li>
-        <li>The contracts are tested against the real Uniswap v4 code but have not been independently audited.</li>
-        <li>Nothing here is investment advice.</li>
-      </ul>
+      <>
+        <ul>
+          <li>Boost can lose most or all of its deposit in a week. Shield&apos;s dollar value is only protected while Boost&apos;s cushion lasts.</li>
+          <li>Payouts are in the Stock Token. Its dollar value is what Chainlink reports; the price you can sell it for may differ.</li>
+          <li>A Stock Token event (a split, a corporate action) can make a round&apos;s prices meaningless; such a round should be cancelled and refunded.</li>
+          <li>The contracts have not had an independent audit. This is not investment advice.</li>
+        </ul>
+      </>
     ),
   },
 ];
 
 export default function Docs() {
   const rows: [string, string | undefined][] = [
-    ["StockpoolTimelock (48h)", CONTRACTS.timelock],
+    ["StockpoolRounds (Shield & Boost)", CONTRACTS.rounds],
     ["StockpoolBuyBurn", CONTRACTS.buyBurn],
-    ["StockpoolFeeRouter", CONTRACTS.feeRouter],
-    ["StockpoolOracle", CONTRACTS.oracle],
-    ["StockpoolRegistry", CONTRACTS.registry],
     ["StockpoolSwapAdapter", CONTRACTS.swapAdapter],
-    ["StockpoolBasket", CONTRACTS.basket],
-    ...POOLS.flatMap((p) => [[`StockpoolVault ${p.ticker}`, p.vault], [`StockpoolPosition ${p.ticker}`, p.position]] as [string, string][]),
-    ...CREDIT_LINES.map((c) => [`StockpoolCreditDesk ${c.ticker}`, c.desk] as [string, string]),
+    ["Owner (dev wallet)", CONTRACTS.owner],
+    ["Keeper", CONTRACTS.keeper],
+    ...SERIES.map((x) => [`${x.ticker} Chainlink feed`, x.feed] as [string, string]),
   ];
+
   return (
     <>
       <Header />
